@@ -1,0 +1,538 @@
+<!doctype html><html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>電費查詢助手</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+/* Layout: 左側電號清單 + 右側逐筆作業區；上方匯入與匯出列 */
+:root {
+  --bg: #f3f5f7;
+  --panel: #ffffff;
+  --ink: #17222d;
+  --muted: #5d6b79;
+  --line: #d9e0e6;
+  --accent: #0b5cad;
+  --accent-ink: #ffffff;
+  --accent-soft: #e3eefa;
+  --ok: #1b7a46;
+  --ok-soft: #e1f3e8;
+  --warn: #9a5b00;
+  --warn-soft: #fbefd5;
+  --err: #b42318;
+  --err-soft: #fbe4e1;
+  --font-body: "Noto Sans TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1720; --panel: #17212c; --ink: #e6edf3; --muted: #93a2b1; --line: #2a3745;
+    --accent: #5aa6ee; --accent-ink: #08121c; --accent-soft: #14304d;
+    --ok: #4cc283; --ok-soft: #12301f; --warn: #e7b25a; --warn-soft: #382a10;
+    --err: #f28b82; --err-soft: #3b1a17; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0f1720; --panel: #17212c; --ink: #e6edf3; --muted: #93a2b1; --line: #2a3745;
+  --accent: #5aa6ee; --accent-ink: #08121c; --accent-soft: #14304d;
+  --ok: #4cc283; --ok-soft: #12301f; --warn: #e7b25a; --warn-soft: #382a10;
+  --err: #f28b82; --err-soft: #3b1a17; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 15px; line-height: 1.6;
+  padding-block: 20px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+h1 { font-size: 22px; margin: 0; text-wrap: balance; }
+h2 { font-size: 15px; margin: 0; }
+.sub { color: var(--muted); margin: 2px 0 0; font-size: 13.5px; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+.pad { padding: 16px; }
+.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+button, .btn {
+  font: inherit; font-size: 14px; cursor: pointer; border-radius: 6px; padding: 7px 14px; line-height: 1.3;
+  border: 1px solid var(--line); background: var(--panel); color: var(--ink); text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+}
+button:hover, .btn:hover { border-color: var(--accent); }
+button.primary, .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 500; }
+button.ghost { border-color: transparent; color: var(--muted); }
+button.danger:hover { border-color: var(--err); color: var(--err); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+input[type=text], textarea {
+  font: inherit; font-size: 14px; width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink);
+}
+textarea { resize: vertical; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.notice { background: var(--warn-soft); color: var(--warn); border-radius: 6px; padding: 8px 12px; font-size: 13.5px; }
+
+/* import */
+.import { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.drop { border: 1.5px dashed var(--line); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+
+/* main */
+.main { display: grid; grid-template-columns: 340px minmax(0, 1fr); gap: 16px; align-items: start; }
+.listhead { padding: 12px 14px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 8px; }
+.bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--ok); width: 0; transition: width .25s; }
+.items { max-height: 62vh; overflow: auto; }
+.item { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 9px 14px; border-bottom: 1px solid var(--line); cursor: pointer; background: none; border-inline: 0; border-top: 0; width: 100%; text-align: left; border-radius: 0; }
+.item:hover { background: var(--accent-soft); }
+.item[aria-current="true"] { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.item .nm { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.item .no { color: var(--muted); font-size: 12.5px; }
+.item .kwh { grid-column: 2; grid-row: 1 / span 2; align-self: center; text-align: right; font-size: 13px; }
+.chip { font-size: 12px; padding: 1px 8px; border-radius: 10px; background: var(--line); color: var(--muted); white-space: nowrap; }
+.chip.done { background: var(--ok-soft); color: var(--ok); }
+.chip.nodata { background: var(--err-soft); color: var(--err); }
+.chip.skip { background: var(--warn-soft); color: var(--warn); }
+
+.work { display: flex; flex-direction: column; }
+.workhead { padding: 14px 16px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: baseline; }
+.step { padding: 14px 16px; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 4px 12px; }
+.step:last-child { border-bottom: 0; }
+.sn { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 13px; font-weight: 700; display: grid; place-items: center; margin-top: 2px; }
+.step .body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.copybox { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.copybox .val { font-family: var(--font-mono); font-size: 18px; letter-spacing: .03em; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 12px; }
+.hint { color: var(--muted); font-size: 13px; }
+.fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.fields label { font-size: 12.5px; color: var(--muted); display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.fields label.big input { font-family: var(--font-mono); font-size: 18px; font-weight: 500; }
+.shotzone { border: 1.5px dashed var(--line); border-radius: 8px; padding: 12px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.shotzone img { max-width: 100%; max-height: 180px; border: 1px solid var(--line); border-radius: 4px; }
+.flag { font-size: 13px; padding: 5px 10px; border-radius: 6px; }
+.flag.ok { background: var(--ok-soft); color: var(--ok); }
+.flag.warn { background: var(--warn-soft); color: var(--warn); }
+.empty { padding: 32px 16px; text-align: center; color: var(--muted); }
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 8px 16px; border-radius: 6px; font-size: 14px; z-index: 20; }
+details summary { cursor: pointer; font-weight: 500; }
+details ol { margin: 8px 0 0; padding-left: 20px; }
+@media (max-width: 860px) {
+  .import, .main { grid-template-columns: 1fr; }
+  .items { max-height: 40vh; }
+}
+@media (prefers-reduced-motion: reduce) { .bar > i { transition: none; } }
+</style></head><body>
+
+<div class="wrap">
+  <header>
+    <h1>電費查詢助手</h1>
+    <p class="sub">在公司電腦的瀏覽器裡用。你在台電官網查，這裡幫你記錄、擷取度數、整理成 Excel，不需要安裝或執行任何程式。</p>
+  </header>
+
+  <details class="panel pad" id="howto">
+    <summary>操作流程（每支電號約 30 秒）</summary>
+    <ol>
+      <li>在下方匯入電號清單（上傳 Excel，或直接從 Excel 複製兩欄貼上）。</li>
+      <li>點左側一筆電號，依右側步驟：開台電查詢頁，貼上電號，查詢，再貼上戶名前六字。</li>
+      <li>結果出來後在台電頁面按 <b>Ctrl+A</b>、<b>Ctrl+C</b>，回到這裡貼進「結果文字」框，度數等欄位會自動帶入。</li>
+      <li>需要查核截圖時，用 <b>Win+Shift+S</b> 截下結果頁，回到這裡按 <b>Ctrl+V</b>。</li>
+      <li>全部查完按「下載 Excel + 截圖」。</li>
+    </ol>
+    <p class="hint">資料只存在你這台電腦的瀏覽器，不會上傳。驗證碼由你自己在台電頁面通過，這裡不碰台電網站。</p>
+  </details>
+
+  <section class="panel pad import" aria-label="匯入電號清單">
+    <div class="drop" id="drop">
+      <h2>方法一：上傳 Excel 清單</h2>
+      <span class="hint">需有「用戶名稱」與「電號」兩欄，欄名會自動辨識。可把檔案拖到這裡。</span>
+      <div class="row"><input type="file" id="file" accept=".xlsx,.xls,.csv" aria-label="選擇電號清單檔案"></div>
+    </div>
+    <div class="drop">
+      <h2>方法二：從 Excel 複製貼上</h2>
+      <textarea id="paste" rows="3" placeholder="選取 Excel 的「用戶名稱、電號」兩欄（可含標題列），複製後貼在這裡"></textarea>
+      <div class="row"><button id="loadPaste" class="primary">載入清單</button></div>
+    </div>
+  </section>
+
+  <div id="exampleNote" class="notice" hidden>目前顯示的是範例資料（電號為虛構）。匯入你的清單後會自動取代。</div>
+
+  <div class="main">
+    <section class="panel" aria-label="電號清單">
+      <div class="listhead">
+        <div class="row" style="justify-content: space-between">
+          <h2 id="progText">0 / 0 完成</h2>
+          <button class="ghost danger" id="clearAll">清除全部</button>
+        </div>
+        <div class="bar"><i id="barFill"></i></div>
+        <div class="row">
+          <button id="dlZip" class="primary">下載 Excel + 截圖</button>
+          <button id="dlXlsx">只下載 Excel</button>
+          <button id="copyTsv">複製表格</button>
+        </div>
+      </div>
+      <div class="items" id="items"></div>
+    </section>
+
+    <section class="panel work" id="work" aria-live="polite"></section>
+  </div>
+</div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+(function () {
+  var QUERY_URL = 'https://service.taipower.com.tw/ebpps2/simplebill/simple-query-bill';
+  var STORE_KEY = 'fx-bill-helper-v1';
+  var FIELDS = [
+    ['month', '帳單月份', '帳單月份'],
+    ['period', '計費期間', '計費期間'],
+    ['kwh', '本期用電度數', '本期用電度數'],
+    ['kwhLast', '去年同期用電度數', '去年同期用電度數'],
+    ['pay', '繳費狀況', '繳費狀況'],
+    ['amount', '應繳總金額', '應繳總金額'],
+    ['code', '查核碼', '查核碼']
+  ];
+  var rows = [], cur = 0, isExample = false, dlCap = null;
+
+  function $(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+  var toastTimer;
+  function toast(msg) {
+    var t = $('toast'); t.textContent = msg; t.hidden = false;
+    clearTimeout(toastTimer); toastTimer = setTimeout(function () { t.hidden = true; }, 2200);
+  }
+  function copyText(text, okMsg) {
+    function fallback() {
+      var ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      var ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta); toast(ok ? okMsg : '複製失敗，請手動選取');
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(function () { toast(okMsg); }, fallback);
+    } else fallback();
+  }
+
+  /* ---------- data helpers ---------- */
+  function cleanCust(s) {
+    var d = String(s == null ? '' : s).replace(/[^0-9]/g, '');
+    if (d.length > 0 && d.length < 11) d = d.padStart(11, '0');
+    return d;
+  }
+  function fmtCust(d) {
+    return d.length === 11 ? d.slice(0, 2) + '-' + d.slice(2, 4) + '-' + d.slice(4, 8) + '-' + d.slice(8, 10) + '-' + d.slice(10) : d;
+  }
+  function name6(u) { return Array.from(u).slice(0, 6).join(''); }
+  function newRow(user, cust) {
+    return { user: String(user || '').trim(), cust: cleanCust(cust), status: 'pending', raw: '', f: {}, note: '', verified: null, shot: null, shotUrl: '' };
+  }
+  function monthKey(r) {
+    var m = /(\d+)年\s*(\d+)月/.exec(r.f.month || '');
+    return m ? m[1] + m[2].padStart(2, '0') : '未知月份';
+  }
+  function shotName(r) { return r.cust + '_' + monthKey(r) + '.png'; }
+
+  function parseBill(text) {
+    var lines = text.split(/\r?\n/).map(function (s) { return s.trim(); }).filter(Boolean);
+    var map = {};
+    for (var i = 0; i < lines.length; i++) {
+      var m = /^([^：:\t]{1,20})(?:[：:]|\t)\s*(.*)$/.exec(lines[i]);
+      if (!m) continue;
+      var k = m[1].trim(), v = m[2].trim();
+      if (!v && lines[i + 1] && !/[：:]/.test(lines[i + 1])) v = lines[i + 1];
+      if (k && v) map[k] = v;
+    }
+    var out = {};
+    FIELDS.forEach(function (fd) {
+      var key = fd[2];
+      if (map[key] != null) { out[fd[0]] = map[key]; return; }
+      var alt = Object.keys(map).filter(function (k) { return k.indexOf(key) === 0; })[0];
+      if (alt) out[fd[0]] = map[alt];
+    });
+    return out;
+  }
+
+  /* ---------- storage (convenience only) ---------- */
+  function save() {
+    try {
+      var slim = rows.map(function (r) { return { user: r.user, cust: r.cust, status: r.status, raw: r.raw, f: r.f, note: r.note, verified: r.verified }; });
+      localStorage.setItem(STORE_KEY, JSON.stringify({ rows: slim, cur: cur }));
+    } catch (e) {}
+  }
+  function load() {
+    try {
+      var s = JSON.parse(localStorage.getItem(STORE_KEY) || 'null');
+      if (s && s.rows && s.rows.length) {
+        rows = s.rows.map(function (r) { r.shot = null; r.shotUrl = ''; return r; });
+        cur = Math.min(s.cur || 0, rows.length - 1); return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  /* ---------- import ---------- */
+  function setRows(list) {
+    rows = list; cur = 0; isExample = false; save(); renderAll();
+    toast('已載入 ' + rows.length + ' 筆電號');
+  }
+  function fromMatrix(mx) {
+    mx = mx.filter(function (r) { return r && r.some(function (c) { return String(c == null ? '' : c).trim() !== ''; }); });
+    if (!mx.length) return [];
+    var hdr = mx[0].map(function (c) { return String(c == null ? '' : c); });
+    var uc = -1, cc = -1;
+    hdr.forEach(function (h, i) {
+      if (uc < 0 && /用戶|戶名|公司|名稱/.test(h)) uc = i;
+      if (cc < 0 && /電號/.test(h)) cc = i;
+    });
+    var hasHeader = uc >= 0 || cc >= 0;
+    if (uc < 0) uc = 0;
+    if (cc < 0) cc = 1;
+    var body = hasHeader ? mx.slice(1) : mx;
+    return body.map(function (r) { return newRow(r[uc], r[cc]); }).filter(function (r) { return r.cust; });
+  }
+  $('file').addEventListener('change', function (e) { readFile(e.target.files[0]); });
+  function readFile(f) {
+    if (!f) return;
+    var rd = new FileReader();
+    rd.onload = function () {
+      try {
+        var wb = XLSX.read(rd.result, { type: 'array' });
+        var ws = wb.Sheets[wb.SheetNames[0]];
+        var mx = XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '' });
+        var list = fromMatrix(mx);
+        if (!list.length) { toast('找不到電號，請確認有「電號」欄'); return; }
+        setRows(list);
+      } catch (err) { toast('讀取失敗：' + err.message); }
+    };
+    rd.readAsArrayBuffer(f);
+  }
+  var drop = $('drop');
+  ['dragenter', 'dragover'].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.add('over'); }); });
+  ['dragleave', 'drop'].forEach(function (ev) { drop.addEventListener(ev, function (e) { e.preventDefault(); drop.classList.remove('over'); }); });
+  drop.addEventListener('drop', function (e) { readFile(e.dataTransfer.files[0]); });
+  $('loadPaste').addEventListener('click', function () {
+    var mx = $('paste').value.split(/\r?\n/).map(function (l) { return l.split('\t'); });
+    var list = fromMatrix(mx);
+    if (!list.length) { toast('沒有讀到電號，請從 Excel 複製兩欄再貼上'); return; }
+    setRows(list); $('paste').value = '';
+  });
+  $('clearAll').addEventListener('click', function () {
+    var b = $('clearAll');
+    if (b.dataset.armed === '1') {
+      rows.forEach(revoke); rows = []; cur = 0; isExample = false;
+      try { localStorage.removeItem(STORE_KEY); } catch (e) {}
+      b.dataset.armed = ''; b.textContent = '清除全部'; renderAll(); toast('已清除');
+    } else {
+      b.dataset.armed = '1'; b.textContent = '再按一次確認清除';
+      setTimeout(function () { b.dataset.armed = ''; b.textContent = '清除全部'; }, 3000);
+    }
+  });
+  function revoke(r) { if (r.shotUrl) { try { URL.revokeObjectURL(r.shotUrl); } catch (e) {} } }
+
+  /* ---------- render ---------- */
+  var STATUS = { pending: '待查', done: '完成', nodata: '查無資料', skip: '略過' };
+  function renderList() {
+    var done = rows.filter(function (r) { return r.status !== 'pending'; }).length;
+    $('progText').textContent = done + ' / ' + rows.length + ' 已處理';
+    $('barFill').style.width = rows.length ? (done / rows.length * 100) + '%' : '0';
+    var h = '';
+    rows.forEach(function (r, i) {
+      h += '<button class="item" data-i="' + i + '"' + (i === cur ? ' aria-current="true"' : '') + '>' +
+        '<span class="nm">' + esc(r.user || '（未填戶名）') + '</span>' +
+        '<span class="kwh mono">' + (r.status === 'done' && r.f.kwh ? esc(r.f.kwh) : '<span class="chip ' + r.status + '">' + STATUS[r.status] + '</span>') + '</span>' +
+        '<span class="no mono">' + esc(fmtCust(r.cust)) + '</span></button>';
+    });
+    $('items').innerHTML = h || '<div class="empty">尚無資料，請先匯入清單</div>';
+    $('exampleNote').hidden = !isExample;
+  }
+
+  function stepHead(n) { return '<div class="sn">' + n + '</div>'; }
+  function renderWork() {
+    var w = $('work');
+    var r = rows[cur];
+    if (!r) { w.innerHTML = '<div class="empty">匯入電號清單後，在這裡逐筆作業。</div>'; return; }
+    var h = '<div class="workhead"><div><h2>' + esc(r.user || '（未填戶名）') + '</h2><span class="hint mono">第 ' + (cur + 1) + ' / ' + rows.length + ' 筆</span></div>' +
+      '<span class="chip ' + r.status + '">' + STATUS[r.status] + '</span></div>';
+
+    h += '<div class="step">' + stepHead(1) + '<div class="body"><b>開啟台電查詢頁，貼上電號</b>' +
+      '<div class="copybox"><span class="val">' + esc(fmtCust(r.cust)) + '</span>' +
+      '<button data-act="copyCust">複製電號</button>' +
+      '<a class="btn" href="' + QUERY_URL + '" target="_blank" rel="noopener">開啟台電查詢頁 ↗</a></div>' +
+      '<span class="hint">在台電頁面貼上電號、通過驗證後按查詢。電號有無橫線都可以。</span></div></div>';
+
+    h += '<div class="step">' + stepHead(2) + '<div class="body"><b>第二階段貼上戶名前六字</b>' +
+      '<div class="copybox"><span class="val">' + esc(name6(r.user)) + '</span><button data-act="copyName">複製戶名前六字</button></div></div></div>';
+
+    h += '<div class="step">' + stepHead(3) + '<div class="body"><b>貼上結果頁文字</b>' +
+      '<span class="hint">在台電結果頁按 Ctrl+A、Ctrl+C，回到這裡點入下方框按 Ctrl+V。</span>' +
+      '<textarea id="raw" rows="4" placeholder="貼上整頁文字，度數會自動帶入">' + esc(r.raw) + '</textarea>';
+    if (r.raw) {
+      var digits = r.raw.replace(/[^0-9]/g, '');
+      if (r.verified === true) h += '<div class="flag ok">已在貼上的文字中找到這支電號，資料對得上。</div>';
+      else if (r.verified === false) h += '<div class="flag warn">貼上的文字裡找不到這支電號，請確認查的是同一筆。</div>';
+    }
+    h += '<div class="fields">';
+    FIELDS.forEach(function (fd) {
+      h += '<label class="' + (fd[0] === 'kwh' ? 'big' : '') + '">' + fd[1] +
+        '<input type="text" data-f="' + fd[0] + '" value="' + esc(r.f[fd[0]] || '') + '"></label>';
+    });
+    h += '</div></div></div>';
+
+    h += '<div class="step">' + stepHead(4) + '<div class="body"><b>查核截圖（選填）</b>' +
+      '<div class="shotzone">';
+    if (r.shotUrl) h += '<img src="' + r.shotUrl + '" alt="查詢截圖預覽"><div class="hint mono">' + esc(shotName(r)) + '</div><button data-act="delShot">移除</button>';
+    else h += '<span class="hint">用 Win+Shift+S 截下結果頁，回到這個頁面按 Ctrl+V。</span>';
+    h += '<label class="btn">選擇圖片檔<input type="file" id="shotFile" accept="image/*" hidden></label></div></div></div>';
+
+    h += '<div class="step">' + stepHead(5) + '<div class="body"><b>記錄這一筆</b>' +
+      '<div class="row">' +
+      '<button class="primary" data-act="done">完成，查下一筆</button>' +
+      '<button data-act="nodata">查無資料</button>' +
+      '<button data-act="skip">略過</button>' +
+      '<button class="ghost" data-act="prev">上一筆</button></div>' +
+      '<label class="hint">備註（選填）<input type="text" id="note" value="' + esc(r.note) + '"></label></div></div>';
+    w.innerHTML = h;
+  }
+  function renderAll() { renderList(); renderWork(); }
+
+  /* ---------- events ---------- */
+  $('items').addEventListener('click', function (e) {
+    var b = e.target.closest('.item'); if (!b) return;
+    cur = +b.dataset.i; save(); renderAll();
+  });
+  function next() { if (cur < rows.length - 1) cur++; save(); renderAll(); $('work').scrollIntoView({ block: 'nearest' }); }
+  $('work').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-act]'); if (!b) return;
+    var r = rows[cur], a = b.dataset.act;
+    if (a === 'copyCust') copyText(r.cust, '已複製電號');
+    else if (a === 'copyName') copyText(name6(r.user), '已複製戶名前六字');
+    else if (a === 'delShot') { revoke(r); r.shot = null; r.shotUrl = ''; renderWork(); }
+    else if (a === 'done') {
+      if (!r.f.kwh) { toast('還沒有本期用電度數，請先貼上結果或手動填入'); return; }
+      r.status = 'done'; next();
+    }
+    else if (a === 'nodata') { r.status = 'nodata'; next(); }
+    else if (a === 'skip') { r.status = 'skip'; next(); }
+    else if (a === 'prev') { if (cur > 0) cur--; save(); renderAll(); }
+  });
+  $('work').addEventListener('input', function (e) {
+    var r = rows[cur], t = e.target;
+    if (t.id === 'raw') {
+      r.raw = t.value;
+      var p = parseBill(r.raw);
+      r.f = Object.assign({}, r.f, p);
+      r.verified = r.raw.replace(/[^0-9]/g, '').indexOf(r.cust) >= 0;
+      if (/查無/.test(r.raw) && !p.kwh) toast('頁面顯示查無資料，可按「查無資料」');
+      save(); fillFields(); renderList(); updateFlag();
+    } else if (t.dataset.f) { r.f[t.dataset.f] = t.value; save(); renderList(); }
+    else if (t.id === 'note') { r.note = t.value; save(); }
+  });
+  function fillFields() {
+    var r = rows[cur];
+    document.querySelectorAll('#work input[data-f]').forEach(function (inp) { inp.value = r.f[inp.dataset.f] || ''; });
+  }
+  function updateFlag() {
+    var r = rows[cur];
+    var old = document.querySelector('#work .flag'); if (old) old.remove();
+    var ta = $('raw'); if (!ta || !r.raw) return;
+    var d = document.createElement('div');
+    d.className = 'flag ' + (r.verified ? 'ok' : 'warn');
+    d.textContent = r.verified ? '已在貼上的文字中找到這支電號，資料對得上。' : '貼上的文字裡找不到這支電號，請確認查的是同一筆。';
+    ta.insertAdjacentElement('afterend', d);
+  }
+  function setShot(blob) {
+    var r = rows[cur]; if (!r) return;
+    revoke(r); r.shot = blob; r.shotUrl = URL.createObjectURL(blob); renderWork(); toast('已加入截圖');
+  }
+  document.addEventListener('paste', function (e) {
+    var items = (e.clipboardData && e.clipboardData.items) || [];
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind === 'file' && items[i].type.indexOf('image/') === 0) {
+        e.preventDefault(); setShot(items[i].getAsFile()); return;
+      }
+    }
+  });
+  $('work').addEventListener('change', function (e) {
+    if (e.target.id === 'shotFile' && e.target.files[0]) setShot(e.target.files[0]);
+  });
+
+  /* ---------- export ---------- */
+  function table1() {
+    var h = ['用戶名稱', '電號', '帳單月份', '計費期間', '本期用電度數', '查詢截圖'];
+    return [h].concat(rows.map(function (r) { return [r.user, r.cust, r.f.month || '', r.f.period || '', numOrStr(r.f.kwh), r.shot ? shotName(r) : '']; }));
+  }
+  function table2() {
+    var h = ['用戶名稱', '電號', '帳單月份', '計費期間', '本期用電度數', '去年同期用電度數', '繳費狀況', '應繳總金額', '查核碼', '查詢截圖', '狀態', '備註'];
+    return [h].concat(rows.map(function (r) {
+      return [r.user, r.cust, r.f.month || '', r.f.period || '', numOrStr(r.f.kwh), numOrStr(r.f.kwhLast), r.f.pay || '', r.f.amount || '', r.f.code || '', r.shot ? shotName(r) : '', STATUS[r.status], r.note];
+    }));
+  }
+  function numOrStr(v) {
+    if (v == null || v === '') return '';
+    var n = Number(String(v).replace(/[,\s度元]/g, ''));
+    return isFinite(n) && /\d/.test(v) ? n : v;
+  }
+  function buildWb() {
+    var wb = XLSX.utils.book_new();
+    var s1 = XLSX.utils.aoa_to_sheet(table1()), s2 = XLSX.utils.aoa_to_sheet(table2());
+    rows.forEach(function (r, i) {
+      if (r.shot) {
+        s1['F' + (i + 2)].l = { Target: '截圖/' + shotName(r) };
+        s2['J' + (i + 2)].l = { Target: '截圖/' + shotName(r) };
+      }
+    });
+    s1['!cols'] = [{ wch: 30 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 14 }, { wch: 20 }];
+    s2['!cols'] = [{ wch: 30 }, { wch: 14 }, { wch: 12 }, { wch: 28 }, { wch: 14 }, { wch: 16 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 20 }, { wch: 10 }, { wch: 20 }];
+    XLSX.utils.book_append_sheet(wb, s1, '用電數據');
+    XLSX.utils.book_append_sheet(wb, s2, '查詢明細');
+    return wb;
+  }
+  function stamp() {
+    var d = new Date(), p = function (n) { return String(n).padStart(2, '0'); };
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '_' + p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+  }
+  async function doSave(filename, data) {
+    if (!dlCap) {
+      var blob = data instanceof Blob ? data : new Blob([data]);
+      var a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(a.href); }, 5000); toast('已下載'); return;
+    }
+    try { await dlCap.save({ filename: filename, data: data }); toast('已儲存'); }
+    catch (e) { if (!e || e.code !== 'declined') toast('下載失敗：' + ((e && e.message) || '請改用「複製表格」')); }
+  }
+  function guard() {
+    if (!rows.length) { toast('清單是空的'); return false; }
+    if (isExample) { toast('目前是範例資料，請先匯入你的清單'); return false; }
+    return true;
+  }
+  $('dlXlsx').addEventListener('click', function () {
+    if (!guard()) return;
+    var buf = XLSX.write(buildWb(), { type: 'array', bookType: 'xlsx' });
+    doSave('用電數據_' + stamp() + '.xlsx', buf);
+  });
+  $('dlZip').addEventListener('click', async function () {
+    if (!guard()) return;
+    var buf = XLSX.write(buildWb(), { type: 'array', bookType: 'xlsx' });
+    var zip = new JSZip();
+    var ts = stamp();
+    zip.file('用電數據_' + ts + '.xlsx', buf);
+    rows.forEach(function (r) { if (r.shot) zip.file('截圖/' + shotName(r), r.shot); });
+    var blob = await zip.generateAsync({ type: 'blob' });
+    doSave('用電數據_' + ts + '.zip', blob);
+  });
+  $('copyTsv').addEventListener('click', function () {
+    if (!rows.length) return;
+    var tsv = table1().map(function (r) { return r.map(function (c) { return String(c).replace(/[\t\r\n]+/g, ' '); }).join('\t'); }).join('\n');
+    copyText(tsv, '已複製，可直接貼到 Excel');
+  });
+
+  /* ---------- boot ---------- */
+  if (!load()) {
+    isExample = true;
+    rows = [newRow('範例股份有限公司高雄分公司', '12345678901'), newRow('範例企業有限公司', '10987654321'), newRow('示範工業股份有限公司', '11223344556')];
+    rows[0].status = 'done'; rows[0].f = { month: '115年10月', period: '115/09/01~115/09/30', kwh: '12,480', kwhLast: '11,902', pay: '已繳費', amount: '48,215', code: '0000' };
+  }
+  renderAll();
+  if (window.claude && window.claude.use) {
+    window.claude.use('downloads').then(function (d) {
+      dlCap = d;
+    }, function () { dlCap = null; });
+  }
+})();
+</script>
+</body></html>
